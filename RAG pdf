@@ -1,0 +1,97 @@
+import streamlit as st
+import cohere
+import PyPDF2
+from fpdf import FPDF
+
+# Initialize Cohere client with your API Key
+API_KEY = "your-cohere-api-key"  # Replace with your actual Cohere API key
+co = cohere.Client(API_KEY)
+
+# Function to extract text from uploaded PDF file
+def extract_text_from_pdf(pdf_file):
+    try:
+        # Open the uploaded PDF file
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        text = ""
+        # Extract text from each page
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            text += page.extract_text()
+        return text
+    except Exception as e:
+        return str(e)
+
+# Function to generate text with Cohere using a prompt
+def generate_text_with_cohere(prompt):
+    try:
+        response = co.generate(
+            model="command-xlarge-nightly",  # Choose appropriate model
+            prompt=prompt,
+            max_tokens=300,  # Max tokens for the generated text
+            temperature=0.7,  # Creativity setting
+        )
+        return response.generations[0].text.strip()
+    except Exception as e:
+        return f"Error generating text: {e}"
+
+# Function to create a PDF from generated text
+def create_pdf_from_text(generated_text):
+    # Create a new PDF instance
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Set font
+    pdf.set_font("Arial", size=12)
+
+    # Add title
+    pdf.cell(200, 10, txt="Generated PDF Content", ln=True, align='C')
+
+    # Add the generated content
+    pdf.multi_cell(0, 10, generated_text)
+
+    # Save the PDF to a temporary file
+    output_pdf = "generated_output.pdf"
+    pdf.output(output_pdf)
+    return output_pdf
+
+# Streamlit UI setup
+st.set_page_config(page_title="RAG PDF Generator", page_icon="📄")
+
+# Application Title
+st.title("📄 RAG PDF Generator")
+st.write("Extract text from a PDF, generate a new response with Cohere, and download it as a PDF!")
+
+# PDF file uploader
+pdf_file = st.file_uploader("Upload a PDF", type=["pdf"])
+
+if pdf_file is not None:
+    # Extract text from the uploaded PDF
+    extracted_text = extract_text_from_pdf(pdf_file)
+    
+    if len(extracted_text) > 0:
+        st.write("### Extracted Text from PDF:")
+        st.write(extracted_text[:1000])  # Show the first 1000 characters for preview
+        
+        # Button to generate new text with Cohere
+        prompt = st.text_area("Provide a prompt for Cohere (optional)", height=100)
+        
+        if st.button("Generate Response with Cohere"):
+            if prompt.strip():
+                # Use the extracted text and user prompt to generate new content
+                full_prompt = f"Based on the following text, {prompt}:\n\n{extracted_text[:1000]}"  # Shortened text for context
+                generated_text = generate_text_with_cohere(full_prompt)
+                
+                st.write("### Generated Text:")
+                st.write(generated_text)
+                
+                # Create a PDF from the generated text
+                output_pdf = create_pdf_from_text(generated_text)
+                
+                # Provide a download link for the generated PDF
+                with open(output_pdf, "rb") as f:
+                    st.download_button("Download Generated PDF", f, file_name="generated_output.pdf")
+            else:
+                st.error("Please provide a prompt for Cohere.")
+    else:
+        st.error("Could not extract text from the uploaded PDF. Please try a different file.")
