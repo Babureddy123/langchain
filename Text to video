@@ -1,0 +1,130 @@
+import streamlit as st
+import cohere
+import cv2
+import numpy as np
+import os
+from tempfile import NamedTemporaryFile
+from moviepy.editor import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip
+from gtts import gTTS  # Text-to-Speech for optional narration
+
+# Initialize the Cohere API client
+API_KEY = "6et42ehTfPbJwKXKQEcksF40MoKGWoXe1FdqAQNQ"  # Replace with your actual Cohere API key
+co = cohere.Client(API_KEY)
+
+# Function for generating a story with Cohere based on genre, character name, and description
+def generate_story(genre, character_name, character_description):
+    try:
+        # Use Cohere to generate a story based on the selected genre, character name, and description
+        prompt = f"Write a {genre} story of approximately 100 words featuring a character named {character_name}. {character_description}"
+
+        response = co.generate(
+            model="command-xlarge-nightly",  # You can use other models if needed
+            prompt=prompt,
+            max_tokens=200,  # Max tokens for a story of 100 words (approx. 2 tokens/word)
+            temperature=0.7,  # Set a temperature for creativity
+        )
+        
+        generated_text = response.generations[0].text.strip()
+        return generated_text
+    except Exception as e:
+        return f"Error: {e}"
+
+# Function to create a video from the story
+def create_video_from_text(story_text, genre):
+    # Video settings
+    width, height = 640, 480
+    fps = 30
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+
+    # Prepare temporary video file
+    temp_video = NamedTemporaryFile(delete=False, suffix='.avi')
+    video_path = temp_video.name
+    out = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+
+    # Split the story into sentences for display
+    story_lines = story_text.split(". ")
+
+    # Generate a background image based on genre
+    bg_image = np.zeros((height, width, 3), dtype=np.uint8)
+    if genre.lower() == 'fantasy':
+        bg_color = (0, 255, 0)  # Green for fantasy
+    elif genre.lower() == 'adventure':
+        bg_color = (255, 165, 0)  # Orange for adventure
+    elif genre.lower() == 'mystery':
+        bg_color = (50, 50, 50)  # Dark for mystery
+    else:
+        bg_color = (0, 0, 255)  # Default red
+
+    bg_image[:] = bg_color
+
+    # Create a video with the story text on each frame
+    for i, line in enumerate(story_lines):
+        frame = bg_image.copy()
+        cv2.putText(frame, line.strip(), (50, 200 + i*30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        out.write(frame)
+        if i > 5:  # After 5 lines, break to simulate text speed
+            break
+
+    out.release()
+    return video_path
+
+# Function to add background music or narration (optional)
+def add_narration_to_video(video_path, story_text):
+    # Generate speech using gTTS (Google Text-to-Speech)
+    tts = gTTS(story_text, lang='en')
+    audio_file = NamedTemporaryFile(delete=False, suffix='.mp3')
+    tts.save(audio_file.name)
+
+    # Load the video and audio files
+    video_clip = VideoFileClip(video_path)
+    audio_clip = AudioFileClip(audio_file.name)
+
+    # Set audio to video
+    video_with_audio = video_clip.set_audio(audio_clip)
+
+    # Save the final video with narration
+    final_video_path = video_path.replace('.avi', '_final.mp4')
+    video_with_audio.write_videofile(final_video_path, codec='libx264', audio_codec='aac')
+
+    return final_video_path
+
+# Streamlit UI setup
+st.set_page_config(page_title="Advanced Story to Video", page_icon="📖")
+
+# Application Title
+st.title("📖 Advanced Story to Video Generator")
+st.write("Generate a creative story and watch the video with background visuals and narration!")
+
+# Genre selection dropdown
+genre = st.selectbox("Select a genre for your story", ["Love", "Adventure", "Mystery", "Fantasy", "Sci-Fi", "Horror"])
+
+# Character name input field
+character_name = st.text_input("Enter the character's name")
+
+# Character description input field
+character_description = st.text_area("Enter a description of the character", height=100)
+
+# Button to generate the story and video
+if st.button("Generate Story and Video"):
+    if genre.strip() and character_name.strip() and character_description.strip():
+        with st.spinner("Generating story..."):
+            generated_story = generate_story(genre, character_name, character_description)
+
+            if not generated_story.startswith("Error"):
+                st.write("### Generated Story:")
+                st.write(generated_story)
+
+                # Create the video from the generated story text
+                st.write("### Generating video...")
+                video_path = create_video_from_text(generated_story, genre)
+
+                # Optionally add narration
+                st.write("### Adding narration and background music...")
+                final_video_path = add_narration_to_video(video_path, generated_story)
+
+                # Display the final video with narration
+                st.video(final_video_path)
+            else:
+                st.error(generated_story)
+    else:
+        st.error("Please select a genre, enter a character's name, and provide a character description.")
